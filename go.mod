@@ -1,0 +1,3 @@
+module github.com/yasserelgammal/rate-limiter
+
+go 1.21

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Rate Limiter Demo</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            line-height: 1.6;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 { color: #333; margin-top: 0; }
+        h2 { color: #555; border-bottom: 2px solid #007bff; padding-bottom: 10px; }
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        pre {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        .endpoint {
+            background: #e7f3ff;
+            padding: 10px;
+            margin: 10px 0;
+            border-left: 4px solid #007bff;
+            border-radius: 3px;
+        }
+        .info {
+            background: #fff3cd;
+            padding: 15px;
+            border-left: 4px solid #ffc107;
+            margin: 20px 0;
+            border-radius: 3px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        button:hover { background: #0056b3; }
+        #output {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 5px;
+            min-height: 100px;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Rate Limiter Demo</h1>
+        
+        <div class="info">
+            <strong>Rate Limit Configuration:</strong><br>
+            - {{.Rate}} requests per {{.Duration}}<br>
+            - Burst capacity: {{.Burst}} requests<br>
+            - Algorithm: Token Bucket
+        </div>
+
+        <h2>Available Endpoints</h2>
+        
+        <div class="endpoint">
+            <strong>GET /api/data</strong> - Rate-limited API endpoint<br>
+            Returns sample data if rate limit allows
+        </div>
+        
+        <div class="endpoint">
+            <strong>GET /api/status</strong> - Check rate limit status<br>
+            Returns current rate limit information without consuming a token
+        </div>
+
+        <h2>Try It Out</h2>
+        <button onclick="makeRequest('/api/data')">Request Data</button>
+        <button onclick="makeRequest('/api/status')">Check Status</button>
+        <button onclick="makeMultipleRequests()">Make 15 Requests (Test Limit)</button>
+        
+        <div id="output">Click a button to test the rate limiter...</div>
+
+        <h2>cURL Examples</h2>
+        <pre>
+# Make a single request
+curl http://localhost:8080/api/data
+
+# Check rate limit status
+curl http://localhost:8080/api/status
+
+# Test rate limiting (make 15 requests quickly)
+for i in {1..15}; do
+  echo "Request $i:"
+  curl -i http://localhost:8080/api/data
+  echo ""
+done
+        </pre>
+    </div>
+
+    <script>
+        async function makeRequest(endpoint) {
+            const output = document.getElementById('output');
+            output.textContent = 'Loading...';
+            
+            try {
+                const response = await fetch(endpoint);
+                const data = await response.json();
+                const headers = {
+                    'X-RateLimit-Remaining': response.headers.get('X-RateLimit-Remaining'),
+                    'X-RateLimit-Reset': response.headers.get('X-RateLimit-Reset'),
+                    'Retry-After': response.headers.get('Retry-After')
+                };
+                
+                output.textContent = 
+                    'Status: ' + response.status + ' ' + response.statusText + '\n\n' +
+                    'Headers:\n' + JSON.stringify(headers, null, 2) + '\n\n' +
+                    'Response:\n' + JSON.stringify(data, null, 2);
+            } catch (error) {
+                output.textContent = 'Error: ' + error.message;
+            }
+        }
+
+        async function makeMultipleRequests() {
+            const output = document.getElementById('output');
+            output.textContent = 'Making 15 requests...\n\n';
+            
+            for (let i = 1; i <= 15; i++) {
+                try {
+                    const response = await fetch('/api/data');
+                    const remaining = response.headers.get('X-RateLimit-Remaining');
+                    const status = response.status;
+                    
+                    output.textContent += `Request ${i}: ${status} - Remaining: ${remaining}\n`;
+                    
+                    if (status === 429) {
+                        const data = await response.json();
+                        output.textContent += `  ❌ Rate limited! ${data.message}\n`;
+                    } else {
+                        output.textContent += `  ✅ Success\n`;
+                    }
+                } catch (error) {
+                    output.textContent += `Request ${i}: Error - ${error.message}\n`;
+                }
+                
+                // Small delay between requests
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+        }
+    </script>
+</body>
+</html>
