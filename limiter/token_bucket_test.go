@@ -70,6 +70,34 @@ func TestTokenBucket_AllowN(t *testing.T) {
 	}
 }
 
+func TestTokenBucket_StatusDoesNotConsumeTokens(t *testing.T) {
+	config := Config{Rate: 1, Duration: time.Hour, Burst: 10}
+	s := store.NewMemoryStore(0)
+	defer s.Close()
+
+	tb, err := NewTokenBucket(config, s)
+	if err != nil {
+		t.Fatalf("create token bucket: %v", err)
+	}
+
+	if result := tb.AllowN("test-key", 4); !result.Allowed {
+		t.Fatal("expected initial request to be allowed")
+	}
+
+	first := tb.Status("test-key")
+	second := tb.Status("test-key")
+	if first.Remaining != 6 || second.Remaining != 6 {
+		t.Fatalf("status consumed tokens: first=%d second=%d", first.Remaining, second.Remaining)
+	}
+
+	if result := tb.Allow("test-key"); !result {
+		t.Fatal("expected token to remain available after status checks")
+	}
+	if remaining := tb.Status("test-key").Remaining; remaining != 5 {
+		t.Fatalf("expected 5 remaining tokens, got %d", remaining)
+	}
+}
+
 func TestTokenBucket_Refill(t *testing.T) {
 	config := Config{
 		Rate:     10, // 10 tokens per second
@@ -217,6 +245,55 @@ func TestTokenBucket_Concurrency(t *testing.T) {
 	// Should allow exactly burst capacity (100)
 	if total != 100 {
 		t.Errorf("Expected exactly 100 allowed requests, got %d", total)
+	}
+}
+
+func TestTokenBucket_ConcurrencyAcrossInstances(t *testing.T) {
+	config := Config{
+		Rate:     1,
+		Duration: time.Hour,
+		Burst:    100,
+	}
+
+	s := store.NewMemoryStore(0)
+	defer s.Close()
+
+	first, err := NewTokenBucket(config, s)
+	if err != nil {
+		t.Fatalf("create first token bucket: %v", err)
+	}
+	second, err := NewTokenBucket(config, s)
+	if err != nil {
+		t.Fatalf("create second token bucket: %v", err)
+	}
+
+	const workers = 500
+	start := make(chan struct{})
+	allowed := make(chan bool, workers)
+	var wg sync.WaitGroup
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(limiter *TokenBucket) {
+			defer wg.Done()
+			<-start
+			allowed <- limiter.Allow("shared-key")
+		}([]*TokenBucket{first, second}[i%2])
+	}
+
+	close(start)
+	wg.Wait()
+	close(allowed)
+
+	var total int64
+	for result := range allowed {
+		if result {
+			total++
+		}
+	}
+
+	if total != config.Burst {
+		t.Fatalf("expected exactly %d allowed requests, got %d", config.Burst, total)
 	}
 }
 

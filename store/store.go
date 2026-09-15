@@ -10,7 +10,8 @@ type Bucket struct {
 	LastRefillAt time.Time
 }
 
-// Store defines the interface for storing rate limiter state
+// Store defines the basic interface for storing rate limiter state.
+// Implement AtomicStore when instances may share this store concurrently.
 type Store interface {
 	// Get retrieves the bucket for the given key
 	// Returns nil if the key doesn't exist
@@ -24,4 +25,13 @@ type Store interface {
 
 	// Clear removes all buckets
 	Clear()
+}
+
+// AtomicStore extends Store with an atomic read-modify-write operation.
+// The update function runs while the key is locked and must not call back into
+// the same store. Returning nil deletes the key.
+type AtomicStore interface {
+	Store
+
+	Update(key string, update func(bucket *Bucket) *Bucket) *Bucket
 }

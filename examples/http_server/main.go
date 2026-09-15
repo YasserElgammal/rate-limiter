@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"html/template"
 	"log"
+	"math"
+	"net"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/yasserelgammal/rate-limiter/limiter"
@@ -14,7 +17,7 @@ import (
 )
 
 var (
-	rateLimiter limiter.RateLimiter
+	rateLimiter *limiter.TokenBucket
 	config      limiter.Config
 )
 
@@ -45,9 +48,7 @@ func main() {
 	}
 
 	// Setup HTTP routes
-	http.HandleFunc("/api/data", rateLimitMiddleware(dataHandler))
-	http.HandleFunc("/api/status", statusHandler)
-	http.HandleFunc("/", homeHandler)
+	mux := routes()
 
 	// Start server
 	addr := ":8080"
@@ -59,7 +60,16 @@ func main() {
 	fmt.Println("  GET  /api/status    - Check rate limit status")
 	fmt.Println("\nTry: curl http://localhost:8080/api/data")
 
-	if err := http.ListenAndServe(addr, nil); err != nil {
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
 }
@@ -81,7 +91,8 @@ func rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 		if !result.Allowed {
 			// Request denied - rate limit exceeded
-			w.Header().Set("Retry-After", fmt.Sprintf("%.0f", result.RetryAfter.Seconds()))
+			retryAfterSeconds := max(1, int64(math.Ceil(result.RetryAfter.Seconds())))
+			w.Header().Set("Retry-After", strconv.FormatInt(retryAfterSeconds, 10))
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusTooManyRequests)
 
@@ -123,8 +134,7 @@ func dataHandler(w http.ResponseWriter, r *http.Request) {
 func statusHandler(w http.ResponseWriter, r *http.Request) {
 	key := getClientIP(r)
 
-	// Check status without consuming a token
-	result := rateLimiter.AllowN(key, 0)
+	status := rateLimiter.Status(key)
 
 	w.Header().Set("Content-Type", "application/json")
 
@@ -132,8 +142,8 @@ func statusHandler(w http.ResponseWriter, r *http.Request) {
 		"client_ip": key,
 		"rate_limit": map[string]interface{}{
 			"limit":     5,
-			"remaining": result.Remaining,
-			"reset_at":  result.ResetAt.Format(time.RFC3339),
+			"remaining": status.Remaining,
+			"reset_at":  status.ResetAt.Format(time.RFC3339),
 		},
 	}
 
@@ -182,20 +192,22 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// getClientIP extracts the client IP address from the request
+// getClientIP extracts the peer IP address from the connection.
+// A production deployment behind a proxy should accept forwarded headers only
+// after verifying that RemoteAddr belongs to a configured trusted proxy.
 func getClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header (for proxies/load balancers)
-	forwarded := r.Header.Get("X-Forwarded-For")
-	if forwarded != "" {
-		return forwarded
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil {
+		return host
 	}
 
-	// Check X-Real-IP header
-	realIP := r.Header.Get("X-Real-IP")
-	if realIP != "" {
-		return realIP
-	}
-
-	// Fall back to RemoteAddr
 	return r.RemoteAddr
+}
+
+func routes() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/data", rateLimitMiddleware(dataHandler))
+	mux.HandleFunc("GET /api/status", statusHandler)
+	mux.HandleFunc("GET /{$}", homeHandler)
+	return mux
 }

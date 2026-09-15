@@ -2,6 +2,8 @@
 
 This directory contains practical examples demonstrating how to use the rate limiter library.
 
+Requires Go 1.27 or later. Run the commands below from the repository root.
+
 ## Available Examples
 
 ### 1. Basic Example (`basic/`)
@@ -16,8 +18,7 @@ A simple command-line example demonstrating core features:
 
 **Run it:**
 ```bash
-cd basic
-go run main.go
+go run ./examples/basic
 ```
 
 **What you'll see:**
@@ -29,12 +30,12 @@ go run main.go
 
 ### 2. HTTP Server Example (`http_server/`)
 
-A production-ready HTTP server with rate limiting middleware:
+An HTTP server demonstrating rate limiting middleware:
 
 **Features:**
 - 🌐 Interactive web UI at `http://localhost:8080`
 - 📊 Rate limiting by IP address
-- 🎯 Standard HTTP headers (`X-RateLimit-*`)
+- 🎯 Common rate-limit headers (`X-RateLimit-*`)
 - 📝 JSON error responses
 - ✅ Status endpoint to check limits
 - 🎨 Beautiful, responsive interface
@@ -46,8 +47,7 @@ A production-ready HTTP server with rate limiting middleware:
 
 **Run it:**
 ```bash
-cd http_server
-go run main.go
+go run ./examples/http_server
 ```
 
 Then visit: `http://localhost:8080`
@@ -109,13 +109,23 @@ if !rateLimiter.Allow(userID) {
 
 ### 2. Rate Limit by IP Address
 ```go
-clientIP := r.RemoteAddr
+host, _, err := net.SplitHostPort(r.RemoteAddr)
+if err != nil {
+    http.Error(w, "invalid remote address", http.StatusBadRequest)
+    return
+}
+
+clientIP := host
 result := rateLimiter.AllowN(clientIP, 1)
 if !result.Allowed {
     http.Error(w, "Too Many Requests", 429)
     return
 }
 ```
+
+Do not trust `X-Forwarded-For` or `X-Real-IP` directly. When deploying behind
+a reverse proxy, accept forwarded headers only when the connection peer is a
+configured trusted proxy, then parse the expected forwarded-header format.
 
 ### 3. Rate Limit by API Token
 ```go
@@ -145,23 +155,23 @@ func rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         // Extract key (IP, user ID, token, etc.)
         key := getClientIP(r)
-        
+
         // Check rate limit
         result := rateLimiter.AllowN(key, 1)
-        
+
         // Set standard headers
         w.Header().Set("X-RateLimit-Limit", "10")
-        w.Header().Set("X-RateLimit-Remaining", 
+        w.Header().Set("X-RateLimit-Remaining",
             fmt.Sprintf("%d", result.Remaining))
-        w.Header().Set("X-RateLimit-Reset", 
+        w.Header().Set("X-RateLimit-Reset",
             result.ResetAt.Format(time.RFC3339))
-        
+
         if !result.Allowed {
             // Rate limit exceeded
-            w.Header().Set("Retry-After", 
+            w.Header().Set("Retry-After",
                 fmt.Sprintf("%.0f", result.RetryAfter.Seconds()))
             w.WriteHeader(http.StatusTooManyRequests)
-            
+
             json.NewEncoder(w).Encode(map[string]interface{}{
                 "error": "Rate limit exceeded",
                 "retry_after": result.RetryAfter.String(),
@@ -169,7 +179,7 @@ func rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
             })
             return
         }
-        
+
         // Request allowed
         next(w, r)
     }
@@ -183,7 +193,7 @@ http.HandleFunc("/api/data", rateLimitMiddleware(dataHandler))
 
 ```bash
 # Run the example
-go run main.go
+go run ./examples/http_server
 
 # In another terminal, test it
 curl http://localhost:8080/api/data
@@ -201,6 +211,10 @@ hey -n 100 -c 10 http://localhost:8080/api/data
 2. **Integrate the middleware** into your application
 3. **Add monitoring** to track rate limit hits
 4. **Consider distributed limiting** with Redis (coming soon)
+
+`MemoryStore` coordinates concurrent decisions across limiter instances through
+`store.AtomicStore`. A custom shared store should implement that optional
+interface to provide the same guarantee.
 
 ## Need Help?
 

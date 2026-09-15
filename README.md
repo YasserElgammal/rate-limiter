@@ -1,10 +1,10 @@
 # Rate Limiter
 
-[![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://go.dev/)
+[![Go Version](https://img.shields.io/badge/Go-1.27+-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/yasserelgammal/rate-limiter)](https://goreportcard.com/report/github.com/yasserelgammal/rate-limiter)
 
-A production-ready, thread-safe rate limiter library for Go applications. Control the number of requests per key (user/IP/token) in a given time frame using the Token Bucket algorithm.
+A thread-safe token-bucket rate limiter library for Go applications. Control requests per key (such as a user, IP address, or API token) while allowing configurable bursts.
 
 ## 🎯 Problem Being Solved
 
@@ -18,9 +18,9 @@ This library provides a simple, efficient, and thread-safe solution for implemen
 
 ## ✨ Features
 
-- 🚀 **Production-ready** - Thread-safe with comprehensive test coverage
+- ⚛️ **Atomic in-memory decisions** - Coordinates concurrent limiter instances sharing one `MemoryStore`
 - 🎯 **Simple API** - Easy to integrate with just a few lines of code
-- 🔒 **Thread-safe** - Uses `sync.RWMutex` for concurrent access
+- 🔒 **Thread-safe storage** - Uses `sync.RWMutex` for concurrent access
 - 💾 **In-memory storage** - Fast, zero-dependency storage (Redis support planned)
 - 🪣 **Token Bucket algorithm** - Smooth rate limiting with burst support
 - 📊 **Detailed results** - Get remaining tokens, reset time, and retry-after duration
@@ -154,6 +154,38 @@ type RateLimiter interface {
 }
 ```
 
+### Store Interfaces
+
+Custom storage implementations must satisfy the basic `Store` interface:
+
+```go
+type Store interface {
+    Get(key string) *Bucket
+    Set(key string, bucket *Bucket)
+    Delete(key string)
+    Clear()
+}
+```
+
+`MemoryStore` also implements the optional `AtomicStore` interface:
+
+```go
+type AtomicStore interface {
+    Store
+    Update(key string, update func(bucket *Bucket) *Bucket) *Bucket
+}
+```
+
+`TokenBucket` uses `AtomicStore.Update` to perform refill, admission, and token
+deduction as one operation. This keeps the token count correct when multiple
+`TokenBucket` instances share the same store.
+
+A custom implementation that supports only `Store` remains compatible. Calls
+through one `TokenBucket` instance are serialized, but separate limiter
+instances sharing that custom store are not coordinated. Implement `AtomicStore`
+when the store will be shared concurrently. The `Update` callback runs while
+the key is locked and must not call back into the same store.
+
 ### Result Structure
 
 ```go
@@ -164,6 +196,18 @@ type Result struct {
     RetryAfter time.Duration // How long to wait before retrying (if denied)
 }
 ```
+
+### Inspecting Current Status
+
+`TokenBucket.Status` reads the current state without consuming a token:
+
+```go
+status := rateLimiter.Status("user123")
+fmt.Printf("Remaining: %d, full at: %v\n", status.Remaining, status.ResetAt)
+```
+
+`Status` is available on `*TokenBucket`; it is not part of `RateLimiter`, so
+existing implementations of that interface remain compatible.
 
 ## 🏗️ Project Structure
 
@@ -191,6 +235,7 @@ rate-limiter/
 ├── go.mod                        # Go module definition
 ├── Makefile                      # Development tasks
 ├── README.md                     # Main documentation
+├── CHANGELOG.MD                  # Release history
 ├── LICENSE                       # MIT License
 ├── CONTRIBUTING.md               # Contribution guidelines
 └── .gitignore                    # Git ignore rules

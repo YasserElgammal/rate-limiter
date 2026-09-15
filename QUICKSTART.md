@@ -2,6 +2,10 @@
 
 Get started with the Rate Limiter library in 5 minutes!
 
+## Requirements
+
+- Go 1.27 or later
+
 ## Installation
 
 ```bash
@@ -13,6 +17,7 @@ go get github.com/yasserelgammal/rate-limiter
 ```go
 import (
     "time"
+
     "github.com/yasserelgammal/rate-limiter/limiter"
     "github.com/yasserelgammal/rate-limiter/store"
 )
@@ -36,6 +41,10 @@ config := limiter.Config{
 memStore := store.NewMemoryStore(5 * time.Minute)
 defer memStore.Close()
 ```
+
+`MemoryStore` performs rate-limit decisions atomically, including when several
+`TokenBucket` instances share it. Custom stores should implement
+`store.AtomicStore` when they need the same shared-instance guarantee.
 
 ## Step 4: Create the Rate Limiter
 
@@ -80,6 +89,7 @@ package main
 import (
     "fmt"
     "time"
+
     "github.com/yasserelgammal/rate-limiter/limiter"
     "github.com/yasserelgammal/rate-limiter/store"
 )
@@ -97,17 +107,20 @@ func main() {
     defer memStore.Close()
 
     // Create limiter
-    rateLimiter, _ := limiter.NewTokenBucket(config, memStore)
+    rateLimiter, err := limiter.NewTokenBucket(config, memStore)
+    if err != nil {
+        panic(err)
+    }
 
     // Use it
     for i := 1; i <= 12; i++ {
         result := rateLimiter.AllowN("user123", 1)
-        
+
         if result.Allowed {
-            fmt.Printf("Request %d: ✅ Allowed (Remaining: %d)\n", 
+            fmt.Printf("Request %d: ✅ Allowed (Remaining: %d)\n",
                 i, result.Remaining)
         } else {
-            fmt.Printf("Request %d: ❌ Denied (Retry after: %v)\n", 
+            fmt.Printf("Request %d: ❌ Denied (Retry after: %v)\n",
                 i, result.RetryAfter)
         }
     }
@@ -121,11 +134,11 @@ func rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         clientIP := r.RemoteAddr
         result := rateLimiter.AllowN(clientIP, 1)
-        
+
         // Set headers
-        w.Header().Set("X-RateLimit-Remaining", 
+        w.Header().Set("X-RateLimit-Remaining",
             fmt.Sprintf("%d", result.Remaining))
-        
+
         if !result.Allowed {
             w.WriteHeader(http.StatusTooManyRequests)
             json.NewEncoder(w).Encode(map[string]string{
@@ -133,7 +146,7 @@ func rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
             })
             return
         }
-        
+
         next(w, r)
     }
 }
@@ -175,10 +188,10 @@ config := limiter.Config{
 
 ```bash
 # Basic example
-go run examples/basic/main.go
+go run ./examples/basic
 
 # HTTP server example
-go run examples/http_server/main.go
+go run ./examples/http_server
 # Then visit http://localhost:8080
 ```
 
@@ -195,7 +208,8 @@ go test -race ./...
 ## Next Steps
 
 - Read the [README.md](README.md) for detailed documentation
-- Check [OVERVIEW.md](OVERVIEW.md) for architecture details
+- Check [PROJECT_STATUS.md](PROJECT_STATUS.md) for the current roadmap
+- Review [CHANGELOG.MD](CHANGELOG.MD) for release history
 - See [examples/](examples/) for more usage patterns
 - Read [CONTRIBUTING.md](CONTRIBUTING.md) to contribute
 
