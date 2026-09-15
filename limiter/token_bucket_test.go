@@ -220,6 +220,55 @@ func TestTokenBucket_Concurrency(t *testing.T) {
 	}
 }
 
+func TestTokenBucket_ConcurrencyAcrossInstances(t *testing.T) {
+	config := Config{
+		Rate:     1,
+		Duration: time.Hour,
+		Burst:    100,
+	}
+
+	s := store.NewMemoryStore(0)
+	defer s.Close()
+
+	first, err := NewTokenBucket(config, s)
+	if err != nil {
+		t.Fatalf("create first token bucket: %v", err)
+	}
+	second, err := NewTokenBucket(config, s)
+	if err != nil {
+		t.Fatalf("create second token bucket: %v", err)
+	}
+
+	const workers = 500
+	start := make(chan struct{})
+	allowed := make(chan bool, workers)
+	var wg sync.WaitGroup
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(limiter *TokenBucket) {
+			defer wg.Done()
+			<-start
+			allowed <- limiter.Allow("shared-key")
+		}([]*TokenBucket{first, second}[i%2])
+	}
+
+	close(start)
+	wg.Wait()
+	close(allowed)
+
+	var total int64
+	for result := range allowed {
+		if result {
+			total++
+		}
+	}
+
+	if total != config.Burst {
+		t.Fatalf("expected exactly %d allowed requests, got %d", config.Burst, total)
+	}
+}
+
 func TestTokenBucket_ConcurrentKeys(t *testing.T) {
 	config := Config{
 		Rate:     10,

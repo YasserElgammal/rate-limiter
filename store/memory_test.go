@@ -192,6 +192,30 @@ func TestMemoryStore_IsolatedCopies(t *testing.T) {
 	}
 }
 
+func TestMemoryStore_UpdateIsAtomic(t *testing.T) {
+	store := NewMemoryStore(0)
+	defer store.Close()
+
+	store.Set("test-key", &Bucket{Tokens: 100, LastRefillAt: time.Now()})
+
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			store.Update("test-key", func(bucket *Bucket) *Bucket {
+				bucket.Tokens--
+				return bucket
+			})
+		}()
+	}
+	wg.Wait()
+
+	if tokens := store.Get("test-key").Tokens; tokens != 0 {
+		t.Fatalf("expected 0 tokens after atomic updates, got %d", tokens)
+	}
+}
+
 func BenchmarkMemoryStore_Set(b *testing.B) {
 	store := NewMemoryStore(0)
 	defer store.Close()

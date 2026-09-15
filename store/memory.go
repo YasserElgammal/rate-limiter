@@ -60,6 +60,26 @@ func (m *MemoryStore) Set(key string, bucket *Bucket) {
 	}
 }
 
+// Update atomically reads, modifies, and stores a bucket.
+func (m *MemoryStore) Update(key string, update func(bucket *Bucket) *Bucket) *Bucket {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var current *Bucket
+	if bucket, exists := m.buckets[key]; exists {
+		current = cloneBucket(bucket)
+	}
+
+	updated := update(current)
+	if updated == nil {
+		delete(m.buckets, key)
+		return nil
+	}
+
+	m.buckets[key] = cloneBucket(updated)
+	return cloneBucket(updated)
+}
+
 // Delete removes the bucket for the given key
 func (m *MemoryStore) Delete(key string) {
 	m.mu.Lock()
@@ -120,4 +140,11 @@ func (m *MemoryStore) Size() int {
 	defer m.mu.RUnlock()
 
 	return len(m.buckets)
+}
+
+func cloneBucket(bucket *Bucket) *Bucket {
+	return &Bucket{
+		Tokens:       bucket.Tokens,
+		LastRefillAt: bucket.LastRefillAt,
+	}
 }

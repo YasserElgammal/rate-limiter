@@ -1,6 +1,7 @@
 package limiter
 
 import (
+	"sync"
 	"time"
 
 	"github.com/yasserelgammal/rate-limiter/store"
@@ -10,6 +11,7 @@ import (
 type TokenBucket struct {
 	config Config
 	store  store.Store
+	mu     sync.Mutex
 }
 
 // NewTokenBucket creates a new TokenBucket rate limiter
@@ -40,22 +42,45 @@ func (tb *TokenBucket) AllowN(key string, n int64) Result {
 		}
 	}
 
-	now := time.Now()
+	if atomicStore, ok := tb.store.(store.AtomicStore); ok {
+		return tb.allowNAtomic(atomicStore, key, n)
+	}
 
-	// Get or create bucket state
-	bucket := tb.store.Get(key)
+	// Preserve compatibility with Store implementations that predate AtomicStore.
+	// The fallback coordinates calls through this TokenBucket instance only.
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+
+	now := time.Now()
+	bucket, allowed := tb.updatedBucket(tb.store.Get(key), now, n)
+	tb.store.Set(key, bucket)
+	return tb.result(bucket, n, allowed)
+}
+
+func (tb *TokenBucket) allowNAtomic(atomicStore store.AtomicStore, key string, n int64) Result {
+	now := time.Now()
+	var result Result
+
+	atomicStore.Update(key, func(bucket *store.Bucket) *store.Bucket {
+		var allowed bool
+		bucket, allowed = tb.updatedBucket(bucket, now, n)
+		result = tb.result(bucket, n, allowed)
+		return bucket
+	})
+
+	return result
+}
+
+func (tb *TokenBucket) updatedBucket(bucket *store.Bucket, now time.Time, n int64) (*store.Bucket, bool) {
 	if bucket == nil {
-		// Initialize new bucket with full capacity
 		bucket = &store.Bucket{
 			Tokens:       tb.config.Burst,
 			LastRefillAt: now,
 		}
 	}
 
-	// Calculate tokens to add based on time elapsed
 	elapsed := now.Sub(bucket.LastRefillAt)
 	tokensToAdd := int64(elapsed.Seconds() * float64(tb.config.Rate) / tb.config.Duration.Seconds())
-
 	if tokensToAdd > 0 {
 		bucket.Tokens += tokensToAdd
 		if bucket.Tokens > tb.config.Burst {
@@ -64,11 +89,16 @@ func (tb *TokenBucket) AllowN(key string, n int64) Result {
 		bucket.LastRefillAt = now
 	}
 
-	// Check if we have enough tokens
 	if bucket.Tokens >= n {
 		bucket.Tokens -= n
-		tb.store.Set(key, bucket)
+		return bucket, true
+	}
 
+	return bucket, false
+}
+
+func (tb *TokenBucket) result(bucket *store.Bucket, n int64, allowed bool) Result {
+	if allowed {
 		return Result{
 			Allowed:   true,
 			Remaining: bucket.Tokens,
@@ -76,10 +106,6 @@ func (tb *TokenBucket) AllowN(key string, n int64) Result {
 		}
 	}
 
-	// Not enough tokens
-	tb.store.Set(key, bucket)
-
-	// Calculate retry after duration
 	tokensNeeded := n - bucket.Tokens
 	retryAfter := time.Duration(float64(tokensNeeded) * tb.config.Duration.Seconds() / float64(tb.config.Rate) * float64(time.Second))
 
