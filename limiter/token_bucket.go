@@ -57,6 +57,34 @@ func (tb *TokenBucket) AllowN(key string, n int64) Result {
 	return tb.result(bucket, n, allowed)
 }
 
+// Status returns the current state for key without consuming tokens.
+func (tb *TokenBucket) Status(key string) Status {
+	if atomicStore, ok := tb.store.(store.AtomicStore); ok {
+		return tb.statusAtomic(atomicStore, key)
+	}
+
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+
+	now := time.Now()
+	bucket := tb.refillBucket(tb.store.Get(key), now)
+	tb.store.Set(key, bucket)
+	return tb.status(bucket)
+}
+
+func (tb *TokenBucket) statusAtomic(atomicStore store.AtomicStore, key string) Status {
+	now := time.Now()
+	var status Status
+
+	atomicStore.Update(key, func(bucket *store.Bucket) *store.Bucket {
+		bucket = tb.refillBucket(bucket, now)
+		status = tb.status(bucket)
+		return bucket
+	})
+
+	return status
+}
+
 func (tb *TokenBucket) allowNAtomic(atomicStore store.AtomicStore, key string, n int64) Result {
 	now := time.Now()
 	var result Result
@@ -72,6 +100,17 @@ func (tb *TokenBucket) allowNAtomic(atomicStore store.AtomicStore, key string, n
 }
 
 func (tb *TokenBucket) updatedBucket(bucket *store.Bucket, now time.Time, n int64) (*store.Bucket, bool) {
+	bucket = tb.refillBucket(bucket, now)
+
+	if bucket.Tokens >= n {
+		bucket.Tokens -= n
+		return bucket, true
+	}
+
+	return bucket, false
+}
+
+func (tb *TokenBucket) refillBucket(bucket *store.Bucket, now time.Time) *store.Bucket {
 	if bucket == nil {
 		bucket = &store.Bucket{
 			Tokens:       tb.config.Burst,
@@ -89,12 +128,7 @@ func (tb *TokenBucket) updatedBucket(bucket *store.Bucket, now time.Time, n int6
 		bucket.LastRefillAt = now
 	}
 
-	if bucket.Tokens >= n {
-		bucket.Tokens -= n
-		return bucket, true
-	}
-
-	return bucket, false
+	return bucket
 }
 
 func (tb *TokenBucket) result(bucket *store.Bucket, n int64, allowed bool) Result {
@@ -114,6 +148,13 @@ func (tb *TokenBucket) result(bucket *store.Bucket, n int64, allowed bool) Resul
 		Remaining:  bucket.Tokens,
 		ResetAt:    tb.calculateResetTime(bucket),
 		RetryAfter: retryAfter,
+	}
+}
+
+func (tb *TokenBucket) status(bucket *store.Bucket) Status {
+	return Status{
+		Remaining: bucket.Tokens,
+		ResetAt:   tb.calculateResetTime(bucket),
 	}
 }
 

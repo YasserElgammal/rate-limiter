@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
   to `MemoryStore`.
 - Add concurrency coverage for atomic memory-store updates and multiple
   `TokenBucket` instances sharing the same store.
+- Add `TokenBucket.Status` to inspect remaining tokens without consuming one.
 
 ### Fixed
 
@@ -17,6 +18,8 @@ All notable changes to this project will be documented in this file.
   multiple `TokenBucket` instances share a `MemoryStore`.
 - Serialize rate-limit decisions made through a single `TokenBucket` when its
   custom store implements only the original `Store` interface.
+- Correct the HTTP example's status endpoint, client IP handling, method
+  restrictions, retry header rounding, and server timeouts.
 
 ## [1.0.0] - 2026-01-17
 

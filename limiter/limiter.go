@@ -14,6 +14,14 @@ type Result struct {
 	RetryAfter time.Duration
 }
 
+// Status describes the current state of a rate limit without consuming tokens.
+type Status struct {
+	// Remaining is the number of tokens currently available.
+	Remaining int64
+	// ResetAt is the time when the bucket will be fully refilled.
+	ResetAt time.Time
+}
+
 // RateLimiter defines the interface for rate limiting implementations
 type RateLimiter interface {
 	// Allow checks if a request for the given key should be allowed
