@@ -14,4 +14,7 @@ var (
 
 	// ErrInvalidTokens is returned when requesting an invalid number of tokens
 	ErrInvalidTokens = errors.New("tokens must be greater than 0")
+
+	// ErrNilStore is returned when no backing store is provided.
+	ErrNilStore = errors.New("store must not be nil")
 )

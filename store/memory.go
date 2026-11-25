@@ -12,6 +12,7 @@ type MemoryStore struct {
 	// Optional: cleanup of expired entries
 	cleanupInterval time.Duration
 	stopCleanup     chan struct{}
+	closeOnce       sync.Once
 }
 
 // NewMemoryStore creates a new in-memory store
@@ -99,7 +100,9 @@ func (m *MemoryStore) Clear() {
 // Close stops the cleanup goroutine
 func (m *MemoryStore) Close() {
 	if m.cleanupInterval > 0 {
-		close(m.stopCleanup)
+		m.closeOnce.Do(func() {
+			close(m.stopCleanup)
+		})
 	}
 }
 

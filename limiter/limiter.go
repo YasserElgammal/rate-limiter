@@ -12,6 +12,8 @@ type Result struct {
 	ResetAt time.Time
 	// RetryAfter is the duration to wait before retrying (only set when Allowed is false)
 	RetryAfter time.Duration
+	// Error describes invalid input. It is nil for valid requests.
+	Error error
 }
 
 // Status describes the current state of a rate limit without consuming tokens.
@@ -31,6 +33,9 @@ type RateLimiter interface {
 	// AllowN checks if n requests for the given key should be allowed
 	// Returns a Result with detailed information about the rate limit status
 	AllowN(key string, n int64) Result
+
+	// Status returns the current state without consuming tokens.
+	Status(key string) Status
 
 	// Reset clears the rate limit state for the given key
 	Reset(key string)
