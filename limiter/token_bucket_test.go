@@ -418,6 +418,91 @@ func TestTokenBucket_RetryAfter(t *testing.T) {
 	}
 }
 
+func TestTokenBucket_PreservesFractionalRefillTime(t *testing.T) {
+	config := Config{Rate: 10, Duration: time.Second, Burst: 10}
+	s := store.NewMemoryStore(0)
+	defer s.Close()
+
+	tb, err := NewTokenBucket(config, s)
+	if err != nil {
+		t.Fatalf("create token bucket: %v", err)
+	}
+
+	now := time.Unix(0, 0)
+	tb.now = func() time.Time { return now }
+
+	if result := tb.AllowN("test-key", 10); !result.Allowed {
+		t.Fatal("expected initial burst to be allowed")
+	}
+
+	now = now.Add(150 * time.Millisecond)
+	if remaining := tb.Status("test-key").Remaining; remaining != 1 {
+		t.Fatalf("expected 1 token after 150ms, got %d", remaining)
+	}
+
+	denied := tb.AllowN("test-key", 2)
+	if denied.Allowed {
+		t.Fatal("expected request for 2 tokens to be denied")
+	}
+	if denied.RetryAfter != 50*time.Millisecond {
+		t.Fatalf("expected fractional remainder to produce 50ms retry, got %v", denied.RetryAfter)
+	}
+
+	now = now.Add(50 * time.Millisecond)
+	if result := tb.AllowN("test-key", 2); !result.Allowed {
+		t.Fatal("expected preserved fractional time to complete the second token")
+	}
+}
+
+func TestTokenBucket_FullBucketDoesNotBankIdleTime(t *testing.T) {
+	config := Config{Rate: 1, Duration: time.Second, Burst: 2}
+	s := store.NewMemoryStore(0)
+	defer s.Close()
+
+	tb, err := NewTokenBucket(config, s)
+	if err != nil {
+		t.Fatalf("create token bucket: %v", err)
+	}
+
+	now := time.Unix(0, 0)
+	tb.now = func() time.Time { return now }
+	if !tb.Allow("test-key") {
+		t.Fatal("expected first request to be allowed")
+	}
+
+	now = now.Add(10 * time.Second)
+	if !tb.Allow("test-key") || !tb.Allow("test-key") {
+		t.Fatal("expected a full bucket after idle time")
+	}
+	if tb.Allow("test-key") {
+		t.Fatal("idle time while full must not provide additional refill credit")
+	}
+}
+
+func TestTokenBucket_InvalidTokens(t *testing.T) {
+	s := store.NewMemoryStore(0)
+	defer s.Close()
+	tb, err := NewTokenBucket(Config{Rate: 1, Duration: time.Second, Burst: 1}, s)
+	if err != nil {
+		t.Fatalf("create token bucket: %v", err)
+	}
+
+	result := tb.AllowN("test-key", 0)
+	if result.Error != ErrInvalidTokens {
+		t.Fatalf("expected %v, got %v", ErrInvalidTokens, result.Error)
+	}
+	if s.Size() != 0 {
+		t.Fatal("invalid request must not create bucket state")
+	}
+}
+
+func TestNewTokenBucket_NilStore(t *testing.T) {
+	_, err := NewTokenBucket(Config{Rate: 1, Duration: time.Second, Burst: 1}, nil)
+	if err != ErrNilStore {
+		t.Fatalf("expected %v, got %v", ErrNilStore, err)
+	}
+}
+
 func BenchmarkTokenBucket_Allow(b *testing.B) {
 	config := Config{
 		Rate:     1000,

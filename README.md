@@ -145,6 +145,9 @@ type RateLimiter interface {
     
     // AllowN checks if n requests should be allowed
     AllowN(key string, n int64) Result
+
+    // Status returns the current state without consuming tokens
+    Status(key string) Status
     
     // Reset clears rate limit for a specific key
     Reset(key string)
@@ -194,6 +197,7 @@ type Result struct {
     Remaining  int64         // Tokens remaining in current window
     ResetAt    time.Time     // When the rate limit resets
     RetryAfter time.Duration // How long to wait before retrying (if denied)
+    Error      error         // Invalid input error, otherwise nil
 }
 ```
 

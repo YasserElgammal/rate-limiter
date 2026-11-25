@@ -216,6 +216,12 @@ func TestMemoryStore_UpdateIsAtomic(t *testing.T) {
 	}
 }
 
+func TestMemoryStore_CloseIsIdempotent(t *testing.T) {
+	store := NewMemoryStore(time.Hour)
+	store.Close()
+	store.Close()
+}
+
 func BenchmarkMemoryStore_Set(b *testing.B) {
 	store := NewMemoryStore(0)
 	defer store.Close()
