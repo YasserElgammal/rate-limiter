@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+
+## [1.2.0] - 2026-11-25
+
+fix: improve token bucket timing and lifecycle safety by [@YasserElgammal](https://github.com/YasserElgammal) in [#2](https://github.com/YasserElgammal/rate-limiter/pull/2)
+
+Improves token bucket timing accuracy, input validation, and memory store lifecycle safety to ensure more reliable and predictable rate limiting.
+
 ## [1.1.0] - 2026-09-15
 
 ### Added
@@ -30,6 +37,3 @@ All notable changes to this project will be documented in this file.
 - Add the thread-safe in-memory store with optional stale-entry cleanup.
 - Add reset operations, validation errors, tests, benchmarks, and runnable basic
   and HTTP examples.
-
-[Unreleased]: https://github.com/YasserElgammal/rate-limiter/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/YasserElgammal/rate-limiter/releases/tag/v1.0.0
